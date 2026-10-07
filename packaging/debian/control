@@ -1,0 +1,14 @@
+Source: oocrc32
+Section: utils
+Priority: optional
+Maintainer: openOODA-tools <ops@openooda.org>
+Standards-Version: 4.6.2
+Build-Depends: debhelper-compat (= 13)
+
+Package: oocrc32
+Architecture: amd64
+Depends: libc6
+Description: CRC32 CHECKSUM
+ Cyclic redundancy check generator utilizing hardware carry-less multiplication.
+ Capability-bounded openOODA utility with zero ambient authority,
+ oote theme palettes, and native Model Context Protocol (MCP) surface.
