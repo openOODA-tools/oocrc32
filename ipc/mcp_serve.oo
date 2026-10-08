@@ -1,0 +1,164 @@
+// # oocrc32 Streaming MCP Server
+//
+// Logline: JSON-RPC 2.0 stdio server exposing sovereign CRC32 calculation, validation, and polynomial tools.
+//
+// Setup: Bridges standard input/output streaming JSON-RPC to the CrcEngine using bounded capability tokens.
+//
+// Beats:
+//   1. Handle MCP initialize handshake with server metadata.
+//   2. Expose tools/list catalogue with five sovereign CRC32 tools.
+//   3. Dispatch tools/call for calculate, verify, check_file, polynomials, and demo.
+//   4. Deliver streaming JSON-RPC responses over standard output.
+
+import "core/crc_types.oo";
+import "core/crc_engine.oo";
+import "core/crc_demo.oo";
+import "render/crc_json.oo";
+import "ipc/json_field.oo";
+
+fn build_error(id: String, code: Int, msg: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":"
+        + to_string(code) + ",\"message\":\"" + json_escape(msg) + "\"}}\n";
+}
+
+fn build_tool_result(id: String, text: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\""
+        + json_escape(text) + "\"}]}}\n";
+}
+
+pub fn render_mcp_init(id: String) -> String {
+    return "{\"jsonrpc\":\"2.0\",\"id\":" + id
+        + ",\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"oocrc32\",\"version\":\"0.2.0\"}}}\n";
+}
+
+pub fn render_mcp_tools_list(id: String) -> String {
+    let mut out: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"tools\":[";
+    out = out + "{\"name\":\"crc32_calculate\",\"description\":\"Compute CRC32 checksum of string data or file.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"data\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},\"algorithm\":{\"type\":\"string\"},\"upper\":{\"type\":\"boolean\"}}}},";
+    out = out + "{\"name\":\"crc32_verify\",\"description\":\"Verify CRC32 checksum against expected hex string.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"expected\":{\"type\":\"string\"},\"data\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},\"algorithm\":{\"type\":\"string\"}},\"required\":[\"expected\"]}},";
+    out = out + "{\"name\":\"crc32_check_file\",\"description\":\"Verify checksums listed in a manifest file or string.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"manifest_path\":{\"type\":\"string\"},\"manifest_data\":{\"type\":\"string\"},\"algorithm\":{\"type\":\"string\"}}}},";
+    out = out + "{\"name\":\"crc32_polynomials\",\"description\":\"Return specifications of supported CRC32 polynomials.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},";
+    out = out + "{\"name\":\"crc32_demo\",\"description\":\"Return RFC 3720 and IEEE 802.3 test vectors and benchmark telemetry.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}";
+    out = out + "]}}\n";
+    return out;
+}
+
+pub fn handle_mcp_call(
+    fr: &FsReadCap,
+    id: String,
+    tool_name: String,
+    req: String
+) -> String {
+    let algo: String = extract_json_str(req, "algorithm");
+    let active_algo: String = if chars_len(algo) > 0 { algo } else { "ieee" };
+
+    if tool_name == "crc32_calculate" {
+        let path: String = extract_json_str(req, "path");
+        let upper: Bool = extract_json_bool(req, "upper", false);
+        if chars_len(path) > 0 {
+            let r: Result[CrcResult, String] = calculate_file_crc(fr, path, active_algo, upper);
+            if r.is_ok() {
+                let res: CrcResult = match r { Ok(v) => v, Err(_) => calculate_crc("", active_algo, upper, "") };
+                return build_tool_result(id, crc_to_json(res));
+            }
+            return build_error(id, -32000, "Cannot calculate CRC on file: " + path);
+        }
+        let data: String = extract_json_str(req, "data");
+        let res: CrcResult = calculate_crc(data, active_algo, upper, "input");
+        return build_tool_result(id, crc_to_json(res));
+    }
+
+    if tool_name == "crc32_verify" {
+        let expected: String = extract_json_str(req, "expected");
+        let path: String = extract_json_str(req, "path");
+        let data: String = if chars_len(path) > 0 {
+            let fr_res: Result[String, String] = read_file(fr, path);
+            match fr_res { Ok(s) => s, Err(_) => "" }
+        } else {
+            extract_json_str(req, "data")
+        };
+        let matches: Bool = verify_checksum(data, expected, active_algo);
+        let calc: CrcResult = calculate_crc(data, active_algo, false, "verify");
+        let out: String = "{\"expected\":\"" + expected + "\",\"computed\":\"" + calc.crc_hex
+            + "\",\"matches\":" + (if matches { "true" } else { "false" }) + "}";
+        return build_tool_result(id, out);
+    }
+
+    if tool_name == "crc32_check_file" {
+        let manifest_path: String = extract_json_str(req, "manifest_path");
+        let mut manifest_data: String = extract_json_str(req, "manifest_data");
+        if chars_len(manifest_data) == 0 && chars_len(manifest_path) > 0 {
+            let fr_res: Result[String, String] = read_file(fr, manifest_path);
+            manifest_data = match fr_res { Ok(s) => s, Err(_) => "" };
+        }
+        let items: List[CrcCheckItem] = parse_and_verify_manifest(fr, manifest_data, active_algo);
+        return build_tool_result(id, check_items_to_json(items));
+    }
+
+    if tool_name == "crc32_polynomials" {
+        let out: String = "{\"polynomials\":[{\"name\":\"ieee\",\"poly\":\"0xEDB88320\",\"description\":\"IEEE 802.3 standard (Ethernet, gzip, zip, PNG)\"},{\"name\":\"castagnoli\",\"poly\":\"0x82F63B78\",\"description\":\"CRC32-C Castagnoli (iSCSI, Btrfs, ext4, NVMe)\"},{\"name\":\"koopman\",\"poly\":\"0xEB31D82E\",\"description\":\"CRC32-K Koopman optimal detection\"}]}";
+        return build_tool_result(id, out);
+    }
+
+    if tool_name == "crc32_demo" {
+        let v: List[CrcResult] = build_demo_results();
+        let m: List[CrcCheckItem] = build_demo_manifest_items();
+        return build_tool_result(id, demo_to_json(v, m));
+    }
+
+    return build_error(id, -32601, "Unknown tool: " + tool_name);
+}
+
+pub fn handle_mcp_message(fr: &FsReadCap, req: String) -> String {
+    let id_str: String = extract_json_str(req, "id");
+    let id: String = if chars_len(id_str) > 0 { "\"" + id_str + "\"" } else { "1" };
+    let method: String = extract_json_str(req, "method");
+
+    if method == "initialize" {
+        return render_mcp_init(id);
+    }
+    if method == "notifications/initialized" {
+        return "";
+    }
+    if method == "tools/list" {
+        return render_mcp_tools_list(id);
+    }
+    if method == "tools/call" {
+        let tool_name: String = extract_json_str(req, "name");
+        return handle_mcp_call(fr, id, tool_name, req);
+    }
+    if method == "shutdown" {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":null}\n";
+    }
+    return build_error(id, -32601, "Method not found: " + method);
+}
+
+pub fn run_mcp_server(fr: &FsReadCap) {
+    let mut buf: String = "";
+    let mut running: Bool = true;
+    while running {
+        let r: Result[String, String] = oo_read_stdin_chunk(fr, 4096);
+        if !r.is_ok() {
+            running = false;
+        } else {
+            let chunk: String = match r { Ok(s) => s, Err(_) => "" };
+            if chars_len(chunk) == 0 {
+                running = false;
+            } else {
+                buf = buf + chunk;
+                let mut nl_pos: Int = str_index_of(buf, "\n");
+                while nl_pos >= 0 {
+                    let line: String = str_slice(buf, 0, nl_pos);
+                    buf = str_slice(buf, nl_pos + 1, chars_len(buf));
+                    let trimmed: String = str_trim(line);
+                    if chars_len(trimmed) > 0 {
+                        let resp: String = handle_mcp_message(fr, trimmed);
+                        if chars_len(resp) > 0 {
+                            print(resp);
+                        }
+                    }
+                    nl_pos = str_index_of(buf, "\n");
+                }
+            }
+        }
+    }
+}

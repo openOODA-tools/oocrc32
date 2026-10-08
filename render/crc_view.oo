@@ -1,0 +1,81 @@
+// # oocrc32 Terminal View Renderer
+//
+// Logline: Formats calculated checksums, verification tables, and demo benchmark suites for terminal output.
+//
+// Setup: Bridges CrcResult and verification states to human-readable streams with themed styling.
+//
+// Beats:
+//   1. Format single checksum lines with hash and file target.
+//   2. Format manifest verification status reports with colored badges.
+//   3. Format synthetic demo benchmark cards and RFC test vector tables.
+//   4. Deliver quiet or verbose output formats.
+
+import "core/crc_types.oo";
+import "render/crc_theme.oo";
+
+pub fn render_crc_line(res: CrcResult, raw_dec: Bool, th: ThemePalette) -> String {
+    let hash_str: String = if raw_dec {
+        to_string(res.crc_dec)
+    } else {
+        res.crc_hex
+    };
+    if chars_len(res.input_name) == 0 || res.input_name == "-" {
+        return th.accent + th.bold + hash_str + th.reset + "\n";
+    }
+    return th.accent + th.bold + hash_str + th.reset + "  " + res.input_name + "\n";
+}
+
+pub fn render_check_results(items: List[CrcCheckItem], th: ThemePalette) -> String {
+    let mut out: String = "";
+    let n: Int = list_len(items);
+    let mut i: Int = 0;
+    let mut passed: Int = 0;
+    let mut failed: Int = 0;
+
+    while i < n {
+        let item: CrcCheckItem = list_get(items, i);
+        let badge: String = if item.matches {
+            passed = passed + 1;
+            th.success + "[OK]    " + th.reset
+        } else if item.status == "MISSING" {
+            failed = failed + 1;
+            th.danger + "[MISSING]" + th.reset
+        } else {
+            failed = failed + 1;
+            th.danger + "[FAILED] " + th.reset
+        };
+
+        out = out + badge + " " + item.filepath + "\n";
+        i = i + 1;
+    }
+
+    out = out + "\n" + th.bold + "Summary: " + th.reset
+        + th.success + to_string(passed) + " passed" + th.reset + ", "
+        + (if failed > 0 { th.danger + to_string(failed) + " failed" + th.reset } else { th.dim + "0 failed" + th.reset }) + "\n";
+
+    return out;
+}
+
+pub fn render_demo_view(
+    results: List[CrcResult],
+    manifest_items: List[CrcCheckItem],
+    th: ThemePalette
+) -> String {
+    let mut out: String = "\n" + th.bold + th.primary
+        + "=== Sovereign openOODA CRC32 Demonstration Suite ===" + th.reset + "\n\n";
+
+    out = out + th.bold + "1. Canonical RFC 3720 & IEEE 802.3 Test Vectors:" + th.reset + "\n";
+    let n: Int = list_len(results);
+    let mut i: Int = 0;
+    while i < n {
+        let r: CrcResult = list_get(results, i);
+        out = out + "  " + th.accent + th.bold + r.crc_hex + th.reset
+            + "  " + th.secondary + r.input_name + th.reset + " (" + to_string(r.bytes_count) + " bytes)\n";
+        i = i + 1;
+    }
+
+    out = out + "\n" + th.bold + "2. Synthetic Manifest Verification Set:" + th.reset + "\n";
+    out = out + render_check_results(manifest_items, th);
+
+    return out;
+}

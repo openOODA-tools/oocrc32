@@ -1,0 +1,132 @@
+// # oocrc32 Execution Engine
+//
+// Logline: Orchestrates CRC32 computations across memory buffers, files, and manifest verification sets.
+//
+// Setup: Demands explicit &FsReadCap for filesystem inputs; pure string evaluation for memory buffers.
+//
+// Beats:
+//   1. Resolve algorithm metadata and generate optimized lookup tables.
+//   2. Calculate checksums for arbitrary string buffers and filesystem paths.
+//   3. Compare computed checksums against expected hex hashes.
+//   4. Parse and verify multi-file checksum manifest files.
+
+import "core/crc_types.oo";
+import "core/crc_table.oo";
+
+fn split_lines(text: String) -> List[String] {
+    let mut lines: List[String] = list_new();
+    let n: Int = chars_len(text);
+    let mut start: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        if char_at(text, i) == "\n" {
+            let line: String = str_slice(text, start, i);
+            lines = list_push(lines, line);
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    if start < n {
+        lines = list_push(lines, str_slice(text, start, n));
+    }
+    return lines;
+}
+
+pub fn calculate_crc(
+    data: String,
+    algo_name: String,
+    upper: Bool,
+    input_name: String
+) -> CrcResult {
+    let algo: CrcAlgorithm = get_algorithm_info(algo_name);
+    let table: List[Int] = make_crc_table(algo.poly_int);
+    let crc_int: Int = crc32_with_table(data, table);
+    let hex_str: String = crc32_to_hex(crc_int, upper);
+
+    return CrcResult {
+        input_name: input_name,
+        crc_hex: hex_str,
+        crc_dec: crc_int,
+        bytes_count: chars_len(data),
+        algorithm: algo.name
+    };
+}
+
+pub fn calculate_file_crc(
+    fr: &FsReadCap,
+    path: String,
+    algo_name: String,
+    upper: Bool
+) -> Result[CrcResult, String] {
+    if !path_exists(fr, path) {
+        return Err("File not found: " + path);
+    }
+    let r: Result[String, String] = read_file(fr, path);
+    if r.is_err() {
+        return Err("Cannot read file: " + path);
+    }
+    let content: String = match r { Ok(v) => v, Err(_) => "" };
+    let res: CrcResult = calculate_crc(content, algo_name, upper, path);
+    return Ok(res);
+}
+
+pub fn verify_checksum(
+    data: String,
+    expected_hex: String,
+    algo_name: String
+) -> Bool {
+    let res: CrcResult = calculate_crc(data, algo_name, false, "input");
+    let exp_lower: String = to_lowercase(str_trim(expected_hex));
+    let act_lower: String = to_lowercase(res.crc_hex);
+    return exp_lower == act_lower;
+}
+
+pub fn parse_and_verify_manifest(
+    fr: &FsReadCap,
+    manifest_content: String,
+    algo_name: String
+) -> List[CrcCheckItem] {
+    let mut items: List[CrcCheckItem] = list_new();
+    let lines: List[String] = split_lines(manifest_content);
+    let num_lines: Int = list_len(lines);
+    let mut i: Int = 0;
+
+    while i < num_lines {
+        let raw_line: String = str_trim(list_get(lines, i));
+        if chars_len(raw_line) > 9 && !str_starts_with(raw_line, "#") {
+            let space_pos: Int = str_index_of(raw_line, " ");
+            if space_pos >= 8 {
+                let exp_crc: String = str_slice(raw_line, 0, space_pos);
+                let mut target_path: String = str_trim(str_slice(raw_line, space_pos + 1, chars_len(raw_line)));
+                if str_starts_with(target_path, "*") {
+                    target_path = str_slice(target_path, 1, chars_len(target_path));
+                }
+                target_path = str_trim(target_path);
+
+                let file_res: Result[CrcResult, String] = calculate_file_crc(fr, target_path, algo_name, false);
+                if file_res.is_ok() {
+                    let calc: CrcResult = match file_res { Ok(v) => v, Err(_) => calculate_crc("", algo_name, false, "") };
+                    let matches: Bool = to_lowercase(calc.crc_hex) == to_lowercase(exp_crc);
+                    items = list_push(items, CrcCheckItem {
+                        expected_crc: exp_crc,
+                        computed_crc: calc.crc_hex,
+                        filepath: target_path,
+                        status: if matches { "OK" } else { "FAILED" },
+                        matches: matches
+                    });
+                } else {
+                    items = list_push(items, CrcCheckItem {
+                        expected_crc: exp_crc,
+                        computed_crc: "--------",
+                        filepath: target_path,
+                        status: "MISSING",
+                        matches: false
+                    });
+                }
+            }
+        }
+        i = i + 1;
+    }
+
+    return items;
+}

@@ -1,0 +1,110 @@
+// # oocrc32 IPC Subsystem Unit Tests
+//
+// Logline: Verification anchors for CLI argument processing and MCP JSON-RPC protocol handlers.
+//
+// Setup: Executes deterministic tests on JSON parsing and argument normalization.
+//
+// Beats:
+//   1. Verify JSON escaping and field extraction routines.
+//   2. Verify CLI flag mapping to CrcConfig state.
+//   3. Verify MCP initialize and tools/list protocol frames.
+//   4. Export unified IPC test harness.
+
+import "core/crc_types.oo";
+import "ipc/json_field.oo";
+import "ipc/crc_opts.oo";
+import "ipc/mcp_serve.oo";
+
+pub fn test_json_helpers() -> Bool {
+    let esc: String = json_escape("line1\n\"quotes\"");
+    if !str_contains(esc, "\\\"quotes\\\"") {
+        return false;
+    }
+    if !str_contains(esc, "\\n") {
+        return false;
+    }
+
+    let payload: String = "{\"algorithm\":\"castagnoli\",\"upper\":true,\"id\":99}";
+    let algo: String = extract_json_str(payload, "algorithm");
+    if algo != "castagnoli" {
+        return false;
+    }
+    let is_upper: Bool = extract_json_bool(payload, "upper", false);
+    if !is_upper {
+        return false;
+    }
+
+    return true;
+}
+
+pub fn test_cli_parsing() -> Bool {
+    let mut args: List[String] = list_push(list_new(), "-a");
+    args = list_push(args, "castagnoli");
+    args = list_push(args, "-u");
+    args = list_push(args, "-j");
+    args = list_push(args, "--theme");
+    args = list_push(args, "matrix");
+    args = list_push(args, "target.bin");
+
+    let parsed: ParsedCrc = parse_crc_args(args);
+    if parsed.config.algorithm != "castagnoli" {
+        return false;
+    }
+    if !parsed.config.uppercase {
+        return false;
+    }
+    if !parsed.config.json_output {
+        return false;
+    }
+    if parsed.config.theme != "matrix" {
+        return false;
+    }
+    if list_len(parsed.config.inputs) != 1 {
+        return false;
+    }
+
+    let mut check_args: List[String] = list_push(list_new(), "-c");
+    check_args = list_push(check_args, "checksums.txt");
+    let parsed_check: ParsedCrc = parse_crc_args(check_args);
+    if !parsed_check.config.check_mode {
+        return false;
+    }
+    if parsed_check.config.check_file != "checksums.txt" {
+        return false;
+    }
+
+    return true;
+}
+
+pub fn test_mcp_frames() -> Bool {
+    let init_resp: String = render_mcp_init("\"crc-init\"");
+    if !str_contains(init_resp, "oocrc32") {
+        return false;
+    }
+    if !str_contains(init_resp, "2024-11-05") {
+        return false;
+    }
+
+    let list_resp: String = render_mcp_tools_list("\"crc-list\"");
+    if !str_contains(list_resp, "crc32_calculate") {
+        return false;
+    }
+    if !str_contains(list_resp, "crc32_polynomials") {
+        return false;
+    }
+
+    return true;
+}
+
+pub fn run_ipc_tests() -> Bool {
+    if !test_json_helpers() {
+        return false;
+    }
+    if !test_cli_parsing() {
+        return false;
+    }
+    if !test_mcp_frames() {
+        return false;
+    }
+    return true;
+}

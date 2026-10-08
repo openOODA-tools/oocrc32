@@ -1,0 +1,65 @@
+// # oocrc32 Demo Fixture & RFC Test Vectors
+//
+// Logline: Generates deterministic test vectors and validation suites across IEEE 802.3 and Castagnoli CRC32 polynomials.
+//
+// Setup: Pure algorithmic test vectors without external filesystem dependencies.
+//
+// Beats:
+//   1. Define standard RFC 3720 and IEEE 802.3 test vectors.
+//   2. Compute multi-algorithm checksums on canonical strings.
+//   3. Build synthetic manifest verification results.
+//   4. Export demo report generators.
+
+import "core/crc_types.oo";
+import "core/crc_engine.oo";
+
+pub fn build_demo_results() -> List[CrcResult] {
+    let mut results: List[CrcResult] = list_new();
+
+    // Vector 1: Canonical 9-digit test vector "123456789"
+    let v1_str: String = "123456789";
+    results = list_push(results, calculate_crc(v1_str, "ieee", true, "\"123456789\" (IEEE 802.3)"));
+    results = list_push(results, calculate_crc(v1_str, "castagnoli", true, "\"123456789\" (Castagnoli / CRC32C)"));
+
+    // Vector 2: Canonical pangram "The quick brown fox jumps over the lazy dog"
+    let v2_str: String = "The quick brown fox jumps over the lazy dog";
+    results = list_push(results, calculate_crc(v2_str, "ieee", true, "\"The quick brown fox...\" (IEEE)"));
+    results = list_push(results, calculate_crc(v2_str, "castagnoli", true, "\"The quick brown fox...\" (CRC32C)"));
+
+    // Vector 3: Empty string
+    let v3_str: String = "";
+    results = list_push(results, calculate_crc(v3_str, "ieee", true, "\"\" [empty payload] (IEEE)"));
+    results = list_push(results, calculate_crc(v3_str, "castagnoli", true, "\"\" [empty payload] (CRC32C)"));
+
+    return results;
+}
+
+pub fn build_demo_manifest_items() -> List[CrcCheckItem] {
+    let mut items: List[CrcCheckItem] = list_new();
+
+    items = list_push(items, CrcCheckItem {
+        expected_crc: "CBF43926",
+        computed_crc: "CBF43926",
+        filepath: "kernel/vmlinuz.bin",
+        status: "OK",
+        matches: true
+    });
+
+    items = list_push(items, CrcCheckItem {
+        expected_crc: "414FA339",
+        computed_crc: "414FA339",
+        filepath: "initramfs.img",
+        status: "OK",
+        matches: true
+    });
+
+    items = list_push(items, CrcCheckItem {
+        expected_crc: "E3069283",
+        computed_crc: "E3069283",
+        filepath: "nvme_block0.raw",
+        status: "OK",
+        matches: true
+    });
+
+    return items;
+}

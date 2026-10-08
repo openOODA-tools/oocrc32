@@ -1,7 +1,7 @@
 # Maintainer: openOODA-tools <ops@openooda.org>
 pkgname=oocrc32-bin
 _pkgname=oocrc32
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Cyclic redundancy check generator utilizing hardware carry-less multiplication."
 arch=('x86_64')

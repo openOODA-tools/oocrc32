@@ -1,0 +1,100 @@
+// # oocrc32 Core Verification Anchor
+//
+// Logline: Deterministic unit tests verifying table generation, bitwise calculations, and RFC test vectors.
+//
+// Setup: Pure algorithmic test execution verifying math invariants without external authority.
+//
+// Beats:
+//   1. Verify table calculation matches bitwise evaluation identically.
+//   2. Verify IEEE 802.3 and Castagnoli canonical test vectors ("123456789").
+//   3. Verify empty string checksum evaluation (0x00000000).
+//   4. Export unified core test harness.
+
+import "core/crc_types.oo";
+import "core/crc_table.oo";
+import "core/crc_engine.oo";
+import "core/crc_demo.oo";
+
+pub fn test_table_vs_bitwise() -> Bool {
+    let algo: CrcAlgorithm = get_algorithm_info("ieee");
+    let table: List[Int] = make_crc_table(algo.poly_int);
+    let sample: String = "Sovereign openOODA CRC32 validation string 2026";
+
+    let res_table: Int = crc32_with_table(sample, table);
+    let res_bit: Int = crc32_bitwise(sample, algo.poly_int);
+
+    if res_table != res_bit {
+        return false;
+    }
+    return true;
+}
+
+pub fn test_canonical_vectors() -> Bool {
+    let input_str: String = "123456789";
+
+    // 1. IEEE 802.3
+    let res_ieee: CrcResult = calculate_crc(input_str, "ieee", true, "v1");
+    if res_ieee.crc_hex != "CBF43926" {
+        return false;
+    }
+    if res_ieee.crc_dec != 3421780262 {
+        return false;
+    }
+
+    // 2. Castagnoli / CRC-32C
+    let res_c: CrcResult = calculate_crc(input_str, "castagnoli", true, "v2");
+    if res_c.crc_hex != "E3069283" {
+        return false;
+    }
+    if res_c.crc_dec != 3808858755 {
+        return false;
+    }
+
+    // 3. Pangram vector "The quick brown fox jumps over the lazy dog"
+    let fox: String = "The quick brown fox jumps over the lazy dog";
+    let res_fox: CrcResult = calculate_crc(fox, "ieee", false, "fox");
+    if res_fox.crc_hex != "414fa339" {
+        return false;
+    }
+
+    return true;
+}
+
+pub fn test_empty_string() -> Bool {
+    let res_empty: CrcResult = calculate_crc("", "ieee", true, "empty");
+    if res_empty.crc_hex != "00000000" {
+        return false;
+    }
+    if res_empty.crc_dec != 0 {
+        return false;
+    }
+    return true;
+}
+
+pub fn test_checksum_verifier() -> Bool {
+    let ok: Bool = verify_checksum("123456789", "CBF43926", "ieee");
+    if !ok {
+        return false;
+    }
+    let bad: Bool = verify_checksum("123456789", "DEADBEEF", "ieee");
+    if bad {
+        return false;
+    }
+    return true;
+}
+
+pub fn run_core_tests() -> Bool {
+    if !test_table_vs_bitwise() {
+        return false;
+    }
+    if !test_canonical_vectors() {
+        return false;
+    }
+    if !test_empty_string() {
+        return false;
+    }
+    if !test_checksum_verifier() {
+        return false;
+    }
+    return true;
+}

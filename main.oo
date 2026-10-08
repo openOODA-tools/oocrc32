@@ -1,52 +1,145 @@
 // # oocrc32 Main Entry Point
 //
-// Logline: Cyclic redundancy check generator utilizing hardware carry-less multiplication.
+// Logline: Cyclic redundancy check generator and manifest verifier with dual-surface CLI and MCP stdio interfaces.
 //
-// Setup: Demands explicit capability tokens and standard argument list.
+// Setup: Demands &FsReadCap, &ProcessCap, and &EnvCap tokens for capability-bounded checksum calculations.
 //
 // Beats:
 //   1. Parse command-line options and dispatch --help, --version, or --mcp.
-//   2. Execute capability-bounded oocrc32 operations.
-//   3. Format and output structured results to standard output.
+//   2. Dispatch synthetic demo execution when --demo is specified.
+//   3. Dispatch manifest verification when -c / --check is active.
+//   4. Calculate and format checksums for filesystem paths or standard input.
 
-fn render_help() -> String {
-    return "oocrc32 0.1.0 (openOODA sovereign data & streaming)\n"
-        + "usage: oocrc32 [options] [ARGUMENTS]...\n\n"
-        + "Cyclic redundancy check generator utilizing hardware carry-less multiplication.\n\n"
-        + "Options:\n"
-        + "  -h, --help           display this help and exit\n"
-        + "  -v, --version        output version information and exit\n"
-        + "      --json           output formatted as JSON Lines\n"
-        + "      --color <WHEN>   colorize output: auto, always, never [default: auto]\n"
-        + "      --theme <NAME>   override active oote palette\n"
-        + "      --mcp            run as Model Context Protocol stdio server\n";
-}
+import "core/crc_types.oo";
+import "core/crc_engine.oo";
+import "core/crc_demo.oo";
+import "render/crc_theme.oo";
+import "render/crc_view.oo";
+import "render/crc_json.oo";
+import "ipc/crc_opts.oo";
+import "ipc/mcp_serve.oo";
+import "anchor.oo";
 
 fn render_version() -> String {
-    return "oocrc32 0.1.0 (openOODA sovereign data & streaming)\n";
+    return "oocrc32 0.2.0 (openOODA sovereign checksum & verification)\n";
 }
 
-fn main(args: List[String]) -> Int {
-    let num_args: Int = list_len(args);
-    let mut i: Int = 0;
+fn read_all_stdin(fr: &FsReadCap) -> String {
+    let mut buf: String = "";
+    let mut reading: Bool = true;
+    while reading {
+        let r: Result[String, String] = oo_read_stdin_chunk(fr, 8192);
+        if !r.is_ok() {
+            reading = false;
+        } else {
+            let chunk: String = match r { Ok(s) => s, Err(_) => "" };
+            if chars_len(chunk) == 0 {
+                reading = false;
+            } else {
+                buf = buf + chunk;
+            }
+        }
+    }
+    return buf;
+}
 
-    while i < num_args {
-        let arg: String = list_get(args, i);
-        if arg == "-h" || arg == "--help" {
-            print(render_help());
-            return 0;
+fn main(
+    fr: &FsReadCap,
+    pr: &ProcessCap,
+    env: &EnvCap,
+    args: List[String]
+) -> Int {
+    let parsed: ParsedCrc = parse_crc_args(args);
+
+    if parsed.show_help {
+        print(render_crc_help());
+        return 0;
+    }
+
+    if parsed.show_version {
+        print(render_version());
+        return 0;
+    }
+
+    if parsed.run_mcp {
+        run_mcp_server(fr);
+        return 0;
+    }
+
+    if chars_len(parsed.parse_error) > 0 {
+        print("oocrc32: " + parsed.parse_error + "\nTry 'oocrc32 --help' for more information.\n");
+        return 1;
+    }
+
+    let th: ThemePalette = get_theme(parsed.config.theme);
+
+    if parsed.config.demo_mode {
+        let vectors: List[CrcResult] = build_demo_results();
+        let manifest: List[CrcCheckItem] = build_demo_manifest_items();
+        if parsed.config.json_output {
+            print(demo_to_json(vectors, manifest) + "\n");
+        } else {
+            print(render_demo_view(vectors, manifest, th));
         }
-        if arg == "-v" || arg == "--version" {
-            print(render_version());
-            return 0;
+        return 0;
+    }
+
+    if parsed.config.check_mode {
+        let manifest_content: String = if chars_len(parsed.config.check_file) > 0 {
+            let r: Result[String, String] = read_file(fr, parsed.config.check_file);
+            match r { Ok(v) => v, Err(_) => "" }
+        } else {
+            read_all_stdin(fr)
+        };
+        let items: List[CrcCheckItem] = parse_and_verify_manifest(fr, manifest_content, parsed.config.algorithm);
+        if parsed.config.json_output {
+            print(check_items_to_json(items) + "\n");
+        } else {
+            print(render_check_results(items, th));
         }
-        if arg == "--mcp" {
-            print("{\"jsonrpc\":\"2.0\",\"result\":{\"status\":\"ready\",\"tool\":\"oocrc32\"}}\n");
-            return 0;
+        let mut all_ok: Bool = true;
+        let n: Int = list_len(items);
+        let mut i: Int = 0;
+        while i < n {
+            let it: CrcCheckItem = list_get(items, i);
+            if !it.matches {
+                all_ok = false;
+            }
+            i = i + 1;
+        }
+        return if all_ok { 0 } else { 1 };
+    }
+
+    let num_inputs: Int = list_len(parsed.config.inputs);
+    if num_inputs == 0 {
+        let stream: String = read_all_stdin(fr);
+        let res: CrcResult = calculate_crc(stream, parsed.config.algorithm, parsed.config.uppercase, "-");
+        if parsed.config.json_output {
+            print(crc_to_json(res) + "\n");
+        } else {
+            print(render_crc_line(res, parsed.config.raw_decimal, th));
+        }
+        return 0;
+    }
+
+    let mut exit_code: Int = 0;
+    let mut i: Int = 0;
+    while i < num_inputs {
+        let target_path: String = list_get(parsed.config.inputs, i);
+        let r: Result[CrcResult, String] = calculate_file_crc(fr, target_path, parsed.config.algorithm, parsed.config.uppercase);
+        if r.is_ok() {
+            let res: CrcResult = match r { Ok(v) => v, Err(_) => calculate_crc("", parsed.config.algorithm, false, "") };
+            if parsed.config.json_output {
+                print(crc_to_json(res) + "\n");
+            } else {
+                print(render_crc_line(res, parsed.config.raw_decimal, th));
+            }
+        } else {
+            print("oocrc32: " + target_path + ": No such file or directory\n");
+            exit_code = 1;
         }
         i = i + 1;
     }
 
-    print("oocrc32: sovereign capability-bounded utility ready\n");
-    return 0;
+    return exit_code;
 }

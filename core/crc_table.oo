@@ -1,0 +1,83 @@
+// # oocrc32 Lookup Table & Math Engine
+//
+// Logline: Generates 256-word CRC32 polynomial lookup tables and executes high-speed table-driven calculations.
+//
+// Setup: Pure algorithmic bit manipulation without external or ambient authority.
+//
+// Beats:
+//   1. Generate 256-word CRC lookup tables for arbitrary reversed polynomials.
+//   2. Compute 32-bit CRC values using byte-by-byte table indexing.
+//   3. Provide bitwise fallback verification implementation.
+//   4. Format 32-bit unsigned integers as 8-character hexadecimal strings.
+
+pub fn make_crc_table(poly: Int) -> List[Int] {
+    let mut table: List[Int] = list_new();
+    let mut i: Int = 0;
+    while i < 256 {
+        let mut c: Int = i;
+        let mut j: Int = 0;
+        while j < 8 {
+            if (c & 1) != 0 {
+                c = (c >> 1) ^ poly;
+            } else {
+                c = c >> 1;
+            }
+            j = j + 1;
+        }
+        table = list_push(table, c & 4294967295);
+        i = i + 1;
+    }
+    return table;
+}
+
+pub fn crc32_with_table(data: String, table: List[Int]) -> Int {
+    let mut crc: Int = 4294967295;
+    let n: Int = chars_len(data);
+    let mut i: Int = 0;
+    while i < n {
+        let b: Int = byte_at(data, i);
+        let table_idx: Int = (crc ^ b) & 255;
+        let entry: Int = list_get(table, table_idx);
+        crc = (crc >> 8) ^ entry;
+        i = i + 1;
+    }
+    return (crc ^ 4294967295) & 4294967295;
+}
+
+pub fn crc32_bitwise(data: String, poly: Int) -> Int {
+    let mut crc: Int = 4294967295;
+    let n: Int = chars_len(data);
+    let mut i: Int = 0;
+    while i < n {
+        let b: Int = byte_at(data, i);
+        crc = crc ^ b;
+        let mut bit: Int = 0;
+        while bit < 8 {
+            if (crc & 1) != 0 {
+                crc = (crc >> 1) ^ poly;
+            } else {
+                crc = crc >> 1;
+            }
+            bit = bit + 1;
+        }
+        i = i + 1;
+    }
+    return (crc ^ 4294967295) & 4294967295;
+}
+
+pub fn crc32_to_hex(val: Int, upper: Bool) -> String {
+    let digits: String = if upper {
+        "0123456789ABCDEF"
+    } else {
+        "0123456789abcdef"
+    };
+    let mut out: String = "";
+    let mut k: Int = 7;
+    while k >= 0 {
+        let shift: Int = k * 4;
+        let nibble: Int = (val >> shift) & 15;
+        out = out + char_at(digits, nibble);
+        k = k - 1;
+    }
+    return out;
+}

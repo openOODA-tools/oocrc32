@@ -1,0 +1,70 @@
+// # oocrc32 JSON Serialization Subsystem
+//
+// Logline: Serializes CRC32 calculations, manifest verification states, and test telemetry to valid JSON streams.
+//
+// Setup: Pure string manipulation routines formatting structured JSON without external dependencies.
+//
+// Beats:
+//   1. Serialize individual CrcResult objects to JSON format.
+//   2. Serialize list of manifest verification items to JSON arrays.
+//   3. Serialize complete demo benchmark suite and vector results.
+//   4. Deliver valid JSON Lines or formatted streams.
+
+import "core/crc_types.oo";
+
+pub fn crc_to_json(res: CrcResult) -> String {
+    let mut out: String = "{\n";
+    out = out + "  \"input\": \"" + res.input_name + "\",\n";
+    out = out + "  \"crc_hex\": \"" + res.crc_hex + "\",\n";
+    out = out + "  \"crc_dec\": " + to_string(res.crc_dec) + ",\n";
+    out = out + "  \"bytes\": " + to_string(res.bytes_count) + ",\n";
+    out = out + "  \"algorithm\": \"" + res.algorithm + "\"\n";
+    out = out + "}";
+    return out;
+}
+
+pub fn check_items_to_json(items: List[CrcCheckItem]) -> String {
+    let mut out: String = "[\n";
+    let n: Int = list_len(items);
+    let mut i: Int = 0;
+    while i < n {
+        let it: CrcCheckItem = list_get(items, i);
+        out = out + "  {\"filepath\": \"" + it.filepath + "\", \"expected\": \""
+            + it.expected_crc + "\", \"computed\": \"" + it.computed_crc + "\", \"matches\": "
+            + (if it.matches { "true" } else { "false" }) + ", \"status\": \"" + it.status + "\"}";
+        if i + 1 < n {
+            out = out + ",";
+        }
+        out = out + "\n";
+        i = i + 1;
+    }
+    out = out + "]";
+    return out;
+}
+
+pub fn demo_to_json(
+    results: List[CrcResult],
+    manifest_items: List[CrcCheckItem]
+) -> String {
+    let mut out: String = "{\n";
+    out = out + "  \"tool\": \"oocrc32\",\n";
+    out = out + "  \"version\": \"0.2.0\",\n";
+    out = out + "  \"vectors\": [\n";
+    let n: Int = list_len(results);
+    let mut i: Int = 0;
+    while i < n {
+        let r: CrcResult = list_get(results, i);
+        out = out + "    {\"target\": \"" + r.input_name + "\", \"hex\": \"" + r.crc_hex
+            + "\", \"dec\": " + to_string(r.crc_dec) + ", \"bytes\": " + to_string(r.bytes_count)
+            + ", \"algorithm\": \"" + r.algorithm + "\"}";
+        if i + 1 < n {
+            out = out + ",";
+        }
+        out = out + "\n";
+        i = i + 1;
+    }
+    out = out + "  ],\n";
+    out = out + "  \"manifest_check\": " + check_items_to_json(manifest_items) + "\n";
+    out = out + "}";
+    return out;
+}

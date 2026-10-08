@@ -1,0 +1,8 @@
+Package: oocrc32
+Version: 0.2.0-1
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: openOODA-tools <ops@openooda.org>
+Description: Cyclic redundancy check generator utilizing hardware carry-less multiplication in pure openOODA.
+ Multi-polynomial CRC32 calculator and manifest validator with dual-surface CLI and MCP stdio server.

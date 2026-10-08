@@ -1,0 +1,94 @@
+// # oocrc32 Core Data Types
+//
+// Logline: Data structures defining CRC32 polynomial variants, calculation results, and CLI/MCP configurations.
+//
+// Setup: Imported by crc_table, crc_engine, crc_demo, renderers, and CLI/MCP harnesses.
+//
+// Beats:
+//   1. Declare CrcAlgorithm describing polynomial configuration and domain standard.
+//   2. Declare CrcResult holding computed checksum, hexadecimal representation, and byte length.
+//   3. Declare CrcCheckItem representing checksum manifest verification state.
+//   4. Declare CrcConfig and export default constructor.
+
+type CrcAlgorithm = struct {
+    name: String,
+    alias: String,
+    poly_hex: String,
+    poly_int: Int,
+    description: String
+};
+
+type CrcResult = struct {
+    input_name: String,
+    crc_hex: String,
+    crc_dec: Int,
+    bytes_count: Int,
+    algorithm: String
+};
+
+type CrcCheckItem = struct {
+    expected_crc: String,
+    computed_crc: String,
+    filepath: String,
+    status: String,
+    matches: Bool
+};
+
+type CrcConfig = struct {
+    algorithm: String,
+    check_mode: Bool,
+    check_file: String,
+    verify_expected: String,
+    uppercase: Bool,
+    raw_decimal: Bool,
+    quiet: Bool,
+    json_output: Bool,
+    demo_mode: Bool,
+    theme: String,
+    inputs: List[String]
+};
+
+pub fn default_crc_config() -> CrcConfig {
+    return CrcConfig {
+        algorithm: "ieee",
+        check_mode: false,
+        check_file: "",
+        verify_expected: "",
+        uppercase: false,
+        raw_decimal: false,
+        quiet: false,
+        json_output: false,
+        demo_mode: false,
+        theme: "default",
+        inputs: list_new()
+    };
+}
+
+pub fn get_algorithm_info(name: String) -> CrcAlgorithm {
+    if name == "castagnoli" || name == "crc32c" || name == "c" {
+        return CrcAlgorithm {
+            name: "castagnoli",
+            alias: "crc32c",
+            poly_hex: "0x82F63B78",
+            poly_int: 2197175160,
+            description: "CRC-32C (iSCSI, Btrfs, ext4, SCTP, NVMe)"
+        };
+    }
+    if name == "koopman" || name == "crc32k" || name == "k" {
+        return CrcAlgorithm {
+            name: "koopman",
+            alias: "crc32k",
+            poly_hex: "0xEB31D82E",
+            poly_int: 3945912366,
+            description: "CRC-32K (Koopman optimal error-detection)"
+        };
+    }
+    // Default IEEE 802.3
+    return CrcAlgorithm {
+        name: "ieee",
+        alias: "crc32",
+        poly_hex: "0xEDB88320",
+        poly_int: 3988292384,
+        description: "IEEE 802.3 (Ethernet, gzip, zip, PNG, POSIX cksum)"
+    };
+}

@@ -1,0 +1,112 @@
+// # oocrc32 CLI Options Parser
+//
+// Logline: Argument parser mapping POSIX and cksum flags to CrcConfig and MCP runtime modes.
+//
+// Setup: Parses raw command line arguments into structured configuration records.
+//
+// Beats:
+//   1. Declare ParsedCrc container holding CrcConfig and dispatch flags.
+//   2. Process algorithm selectors (-a, --algorithm, --crc32c).
+//   3. Process manifest verification triggers (-c, --check, --verify).
+//   4. Deliver standard usage help text.
+
+import "core/crc_types.oo";
+
+type ParsedCrc = struct {
+    config: CrcConfig,
+    show_help: Bool,
+    show_version: Bool,
+    run_mcp: Bool,
+    parse_error: String
+};
+
+pub fn parse_crc_args(args: List[String]) -> ParsedCrc {
+    let mut cfg: CrcConfig = default_crc_config();
+    let mut show_help: Bool = false;
+    let mut show_version: Bool = false;
+    let mut run_mcp: Bool = false;
+    let mut parse_error: String = "";
+
+    let num_args: Int = list_len(args);
+    let mut i: Int = 0;
+    while i < num_args {
+        let arg: String = list_get(args, i);
+        if arg == "-h" || arg == "--help" {
+            show_help = true;
+        } else if arg == "-v" || arg == "--version" {
+            show_version = true;
+        } else if arg == "--mcp" {
+            run_mcp = true;
+        } else if arg == "-a" || arg == "--algorithm" {
+            if i + 1 < num_args {
+                i = i + 1;
+                cfg.algorithm = list_get(args, i);
+            } else {
+                parse_error = "--algorithm requires an algorithm name (ieee, castagnoli, koopman)";
+            }
+        } else if arg == "--crc32c" || arg == "-C" {
+            cfg.algorithm = "castagnoli";
+        } else if arg == "-c" || arg == "--check" {
+            cfg.check_mode = true;
+            if i + 1 < num_args && !str_starts_with(list_get(args, i + 1), "-") {
+                i = i + 1;
+                cfg.check_file = list_get(args, i);
+            }
+        } else if arg == "--verify" {
+            if i + 1 < num_args {
+                i = i + 1;
+                cfg.verify_expected = list_get(args, i);
+            } else {
+                parse_error = "--verify requires expected hex hash argument";
+            }
+        } else if arg == "-u" || arg == "--upper" || arg == "--uppercase" {
+            cfg.uppercase = true;
+        } else if arg == "-r" || arg == "--raw" || arg == "--decimal" {
+            cfg.raw_decimal = true;
+        } else if arg == "-q" || arg == "--quiet" {
+            cfg.quiet = true;
+        } else if arg == "-j" || arg == "--json" {
+            cfg.json_output = true;
+        } else if arg == "-d" || arg == "--demo" {
+            cfg.demo_mode = true;
+        } else if arg == "--theme" {
+            if i + 1 < num_args {
+                i = i + 1;
+                cfg.theme = list_get(args, i);
+            }
+        } else if str_starts_with(arg, "-") && arg != "-" {
+            parse_error = "Unknown option: " + arg;
+        } else {
+            cfg.inputs = list_push(cfg.inputs, arg);
+        }
+        i = i + 1;
+    }
+
+    return ParsedCrc {
+        config: cfg,
+        show_help: show_help,
+        show_version: show_version,
+        run_mcp: run_mcp,
+        parse_error: parse_error
+    };
+}
+
+pub fn render_crc_help() -> String {
+    let mut out: String = "Usage: oocrc32 [OPTIONS] [FILE]...\n\n";
+    out = out + "Cyclic redundancy check generator utilizing hardware carry-less multiplication.\n\n";
+    out = out + "Options:\n";
+    out = out + "  -a, --algorithm <NAME>   Polynomial algorithm: ieee (default), castagnoli/crc32c, koopman\n";
+    out = out + "  -C, --crc32c             Shortcut for --algorithm castagnoli\n";
+    out = out + "  -c, --check [FILE]       Read checksums from manifest FILE and verify them\n";
+    out = out + "      --verify <HASH>      Verify input data against expected hex checksum\n";
+    out = out + "  -u, --upper              Format hexadecimal checksum in uppercase\n";
+    out = out + "  -r, --raw                Output raw decimal unsigned 32-bit integer\n";
+    out = out + "  -q, --quiet              Do not print OK for each successfully verified file\n";
+    out = out + "  -d, --demo               Run synthetic RFC 3720 test vector and benchmark suite\n";
+    out = out + "  -j, --json               Output structured JSON\n";
+    out = out + "      --theme <THEME>      Select terminal color theme (ember, ocean, matrix, cyber, monochrome)\n";
+    out = out + "      --mcp                Run streaming MCP JSON-RPC 2.0 server on stdio\n";
+    out = out + "  -h, --help               Show this help message and exit\n";
+    out = out + "  -v, --version            Show version information and exit\n";
+    return out;
+}
